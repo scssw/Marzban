@@ -111,12 +111,7 @@ Marzban 是一个用户友好、功能丰富且可靠的工具。它让您可以
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/scssw/Marzban/master/install.sh)"
 ```
 
-脚本会构建本仓库的 Docker 镜像、配置 SQLite 和安装 `tls` 命令。绑定域名申请证书前，请将域名解析到服务器并确保公网 80 端口可访问。面板使用 TCP 8000 端口；请在云防火墙/系统防火墙放行。安装时可选择申请证书，也可稍后运行 `tls` 绑定域名。首次创建管理员：
-
-```bash
-cd /opt/marzban
-PYTHONPATH=/opt/scssw-marzban /opt/marzban/venv/bin/python /opt/scssw-marzban/marzban-cli.py admin create --sudo
-```
+安装前将域名解析到服务器，并确保公网 80 端口可访问。脚本会自动申请证书、构建本仓库镜像、设置面板端口 8188，并询问管理员用户名和密码。完成后可直接访问 `https://域名:8188/dashboard/`，也可运行 `tls` 进入管理菜单。
 
 已有 Marzban 数据目录时，请先做好备份并自行迁移，安装脚本会拒绝覆盖 `/opt/marzban`。
 
@@ -126,33 +121,20 @@ Once the installation is complete:
 - The Marzban files will be located at `/opt/marzban`
 - The configuration file can be found at `/opt/marzban/.env` (refer to [configurations](#configuration) section to see variables)
 - The data files will be placed at `/var/lib/marzban`
-- For security reasons, the Marzban dashboard is not accessible via IP address. Therefore, you must [obtain SSL certificate](https://gozargah.github.io/marzban/en/examples/issue-ssl-certificate) and access your Marzban dashboard by opening a web browser and navigating to `https://YOUR_DOMAIN:8000/dashboard/` (replace YOUR_DOMAIN with your actual domain)
+- The dashboard is available at `https://YOUR_DOMAIN:8188/dashboard/` after installation.
 - You can also use SSH port forwarding to access the Marzban dashboard locally without a domain. Replace `user@serverip` with your actual SSH username and server IP and Run the command below:
 
 ```bash
-ssh -L 8000:localhost:8000 user@serverip
+ssh -L 8188:localhost:8188 user@serverip
 ```
 
 Finally, you can enter the following link in your browser to access your Marzban dashboard:
 
-http://localhost:8000/dashboard/
+http://localhost:8188/dashboard/
 
 You will lose access to the dashboard as soon as you close the SSH terminal. Therefore, this method is recommended only for testing purposes.
 
-Next, you need to create a sudo admin for logging into the Marzban dashboard by the following command
-
-```bash
-cd /opt/marzban
-PYTHONPATH=/opt/scssw-marzban /opt/marzban/venv/bin/python /opt/scssw-marzban/marzban-cli.py admin create --sudo
-```
-
-That's it! You can login to your dashboard using these credentials
-
-To see the help message of the Marzban script, run the following command
-
-```bash
-tls
-```
+管理员已在安装过程中创建。使用安装时设置的用户名和密码登录面板。运行 `tls` 可打开服务器管理菜单。
 
 If you are eager to run the project using the source code, check the section below
 <details markdown="1">
@@ -221,7 +203,7 @@ server {
     ssl_certificate_key  /etc/letsencrypt/live/example.com/privkey.pem;
 
     location ~* /(dashboard|statics|sub|api|docs|redoc|openapi.json) {
-        proxy_pass http://0.0.0.0:8000;
+        proxy_pass http://0.0.0.0:8188;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -257,7 +239,7 @@ server {
     ssl_certificate_key  /etc/letsencrypt/live/example.com/privkey.pem;
 
     location / {
-        proxy_pass http://0.0.0.0:8000;
+        proxy_pass http://0.0.0.0:8188;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -265,7 +247,7 @@ server {
 }
 ```
 
-默认情况下，应用将在 `http://localhost:8000/dashboard` 上运行。您可以通过更改 `UVICORN_HOST` 和 `UVICORN_PORT` 环境变量来进行配置。
+默认情况下，应用将在 `http://localhost:8188/dashboard` 上运行。您可以通过更改 `UVICORN_HOST` 和 `UVICORN_PORT` 环境变量来进行配置。
 </details>
 
 # 配置
@@ -278,7 +260,7 @@ server {
 | SUDO_PASSWORD                            | 管理员密码（默认: admin）                                                                                                        |
 | SQLALCHEMY_DATABASE_URL                  | 数据库文档（[SQLAlchemy's docs](https://docs.sqlalchemy.org/en/20/core/engines.html#database-urls)）                           |
 | UVICORN_HOST                             | 绑定应用程序到此主机（默认为 `0.0.0.0`）                                                                                               |
-| UVICORN_PORT                             | 绑定应用程序到此端口（默认为 `8000`）                                                                                                  |
+| UVICORN_PORT                             | 绑定应用程序到此端口（默认为 `8188`）                                                                                                  |
 | UVICORN_UDS                              | 将应用程序绑定到一个 UNIX 域套接字                                                                                                    |
 | UVICORN_SSL_CERTFILE                     | SSL 证书文件路径                                                                                                              |
 | UVICORN_SSL_KEYFILE                      | SSL 密钥文件路径                                                                                                              |

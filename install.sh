@@ -20,9 +20,39 @@ if [[ -e "$INSTALL_DIR" ]]; then
     echo "请先备份数据，并将现有安装目录移走后重试。" >&2
     exit 1
 fi
+if [[ -e "$SOURCE_DIR" ]]; then
+    echo "$SOURCE_DIR 已存在；请先检查并移走旧源码目录。" >&2
+    exit 1
+fi
+
+read -r -p "绑定域名: " DOMAIN
+if [[ ! "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || [[ "$DOMAIN" != *.* ]]; then
+    echo "请输入有效域名。" >&2
+    exit 1
+fi
+read -r -p "面板管理员用户名: " ADMIN_USERNAME
+if [[ ! "$ADMIN_USERNAME" =~ ^[A-Za-z0-9_.@-]{3,32}$ ]]; then
+    echo "用户名须为 3 至 32 位字母、数字或 . _ @ -。" >&2
+    exit 1
+fi
+while true; do
+    read -r -s -p "面板管理员密码（至少 8 位）: " ADMIN_PASSWORD
+    echo
+    read -r -s -p "再次输入密码: " ADMIN_PASSWORD_CONFIRM
+    echo
+    if [[ ${#ADMIN_PASSWORD} -ge 8 && "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD_CONFIRM" ]]; then
+        break
+    fi
+    echo "密码不匹配或少于 8 位，请重试。" >&2
+done
+unset ADMIN_PASSWORD_CONFIRM
 
 apt-get update
-apt-get install -y ca-certificates curl git python3 python3-venv python3-pip certbot
+apt-get install -y ca-certificates curl git python3 python3-venv python3-pip certbot iproute2
+if ss -H -ltn 'sport = :8188' | grep -q .; then
+    echo "TCP 8188 已被占用，请释放该端口后重新安装。" >&2
+    exit 1
+fi
 
 if ! command -v docker >/dev/null 2>&1; then
     curl -fsSL https://get.docker.com | sh
@@ -35,10 +65,8 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 systemctl enable --now docker
 
-if [[ -e "$SOURCE_DIR" ]]; then
-    echo "$SOURCE_DIR 已存在；请先检查并移走旧源码目录。" >&2
-    exit 1
-fi
+certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email -d "$DOMAIN"
+
 git clone --depth 1 "$REPOSITORY" "$SOURCE_DIR"
 mkdir -p "$INSTALL_DIR" "$DATA_DIR"
 cp "$SOURCE_DIR/.env.example" "$INSTALL_DIR/.env"
@@ -50,19 +78,9 @@ fi
 
 sed -i 's|^# *XRAY_JSON *=.*|XRAY_JSON = "/var/lib/marzban/xray_config.json"|' "$INSTALL_DIR/.env"
 sed -i 's|^# *SQLALCHEMY_DATABASE_URL *=.*|SQLALCHEMY_DATABASE_URL = "sqlite:////var/lib/marzban/db.sqlite3"|' "$INSTALL_DIR/.env"
-
-read -r -p "现在绑定域名并申请 HTTPS 证书？(y/N): " BIND_DOMAIN
-if [[ "$BIND_DOMAIN" =~ ^[Yy]$ ]]; then
-    read -r -p "域名: " DOMAIN
-    read -r -p "证书通知邮箱: " CERT_EMAIL
-    if [[ ! "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || [[ -z "$CERT_EMAIL" ]]; then
-        echo "域名或邮箱格式无效。" >&2
-        exit 1
-    fi
-    certbot certonly --standalone --non-interactive --agree-tos --email "$CERT_EMAIL" -d "$DOMAIN"
-    printf '\nUVICORN_SSL_CERTFILE="/etc/letsencrypt/live/%s/fullchain.pem"\nUVICORN_SSL_KEYFILE="/etc/letsencrypt/live/%s/privkey.pem"\nXRAY_SUBSCRIPTION_URL_PREFIX="https://%s"\n' \
-        "$DOMAIN" "$DOMAIN" "$DOMAIN" >> "$INSTALL_DIR/.env"
-fi
+sed -i 's/^UVICORN_PORT *=.*/UVICORN_PORT = 8188/' "$INSTALL_DIR/.env"
+printf '\nUVICORN_SSL_CERTFILE="/etc/letsencrypt/live/%s/fullchain.pem"\nUVICORN_SSL_KEYFILE="/etc/letsencrypt/live/%s/privkey.pem"\nXRAY_SUBSCRIPTION_URL_PREFIX="https://%s"\n' \
+    "$DOMAIN" "$DOMAIN" "$DOMAIN" >> "$INSTALL_DIR/.env"
 
 python3 -m venv "$INSTALL_DIR/venv"
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
@@ -86,6 +104,21 @@ EOF
 docker compose -f "$INSTALL_DIR/docker-compose.yml" build
 docker compose -f "$INSTALL_DIR/docker-compose.yml" up -d
 
+ADMIN_CREATED=false
+for attempt in $(seq 1 60); do
+    if OUTPUT=$(printf '%s\n%s\n' "$ADMIN_USERNAME" "$ADMIN_PASSWORD" | docker compose -f "$INSTALL_DIR/docker-compose.yml" exec -T marzban sh -c 'read -r username; read -r password; export MARZBAN_ADMIN_PASSWORD="$password"; exec marzban-cli admin create --username "$username" --sudo --telegram-id 0 --discord-webhook ""' 2>&1); then
+        echo "$OUTPUT"
+        ADMIN_CREATED=true
+        break
+    fi
+    sleep 2
+done
+unset ADMIN_PASSWORD
+if [[ "$ADMIN_CREATED" != true ]]; then
+    echo "管理员创建失败；查看日志：docker compose -f $INSTALL_DIR/docker-compose.yml logs marzban" >&2
+    exit 1
+fi
+
 if [[ -d /etc/letsencrypt/renewal-hooks/deploy ]]; then
     cat > /etc/letsencrypt/renewal-hooks/deploy/restart-scssw-marzban <<EOF
 #!/bin/sh
@@ -108,10 +141,6 @@ EOF
 chmod 755 /usr/local/bin/tls
 
 echo
-if [[ -n "${DOMAIN:-}" ]]; then
-    echo "安装完成。面板地址: https://$DOMAIN:8000/dashboard/"
-else
-    echo "安装完成。未绑定域名时面板仅监听本机，可运行 tls 绑定域名或使用 SSH 转发。"
-fi
-echo "运行 tls 进入管理菜单；首次请先创建管理员："
-echo "  cd $INSTALL_DIR && PYTHONPATH=$SOURCE_DIR $INSTALL_DIR/venv/bin/python $SOURCE_DIR/marzban-cli.py admin create --sudo"
+echo "安装完成。面板地址: https://$DOMAIN:8188/dashboard/"
+echo "管理员用户名: $ADMIN_USERNAME"
+echo "运行 tls 进入服务器管理菜单。"
