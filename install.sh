@@ -84,7 +84,6 @@ printf '\nUVICORN_SSL_CERTFILE="/etc/letsencrypt/live/%s/fullchain.pem"\nUVICORN
     "$DOMAIN" "$DOMAIN" "$DOMAIN" >> "$INSTALL_DIR/.env"
 
 python3 -m venv "$INSTALL_DIR/venv"
-"$INSTALL_DIR/venv/bin/pip" install --upgrade pip
 "$INSTALL_DIR/venv/bin/pip" install -r "$SOURCE_DIR/requirements.txt"
 
 cat > "$INSTALL_DIR/docker-compose.yml" <<EOF
