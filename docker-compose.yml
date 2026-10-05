@@ -1,8 +1,11 @@
 services:
   marzban:
-    image: gozargah/marzban:latest
+    image: scssw/marzban:latest
+    build: .
+    container_name: marzban
     restart: always
     env_file: .env
     network_mode: host
     volumes:
       - /var/lib/marzban:/var/lib/marzban
+      - /etc/letsencrypt:/etc/letsencrypt:ro

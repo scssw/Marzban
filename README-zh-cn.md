@@ -105,29 +105,27 @@ Marzban 是一个用户友好、功能丰富且可靠的工具。它让您可以
 
 
 # 安装指南
-运行以下命令以使用 SQLite 数据库安装 Marzban。
+在全新 Debian/Ubuntu 服务器上运行以下命令，安装 scssw 定制版本：
 
 ```bash
-sudo bash -c "$(curl -sL https://github.com/Gozargah/Marzban-scripts/raw/master/marzban.sh)" @ install
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/scssw/Marzban/master/install.sh)"
 ```
 
-运行以下命令以使用 MySQL 数据库安装 Marzban。
+脚本会构建本仓库的 Docker 镜像、配置 SQLite 和安装 `tls` 命令。绑定域名申请证书前，请将域名解析到服务器并确保公网 80 端口可访问。面板使用 TCP 8000 端口；请在云防火墙/系统防火墙放行。安装时可选择申请证书，也可稍后运行 `tls` 绑定域名。首次创建管理员：
 
 ```bash
-sudo bash -c "$(curl -sL https://github.com/Gozargah/Marzban-scripts/raw/master/marzban.sh)" @ install --database mysql
+cd /opt/marzban
+PYTHONPATH=/opt/scssw-marzban /opt/marzban/venv/bin/python /opt/scssw-marzban/marzban-cli.py admin create --sudo
 ```
 
-运行以下命令以使用 MariaDB 数据库安装 Marzban。
-```bash
-sudo bash -c "$(curl -sL https://github.com/Gozargah/Marzban-scripts/raw/master/marzban.sh)" @ install --database mariadb
-```
+已有 Marzban 数据目录时，请先做好备份并自行迁移，安装脚本会拒绝覆盖 `/opt/marzban`。
 
 Once the installation is complete:
 
 - You will see the logs that you can stop watching them by closing the terminal or pressing `Ctrl+C`
 - The Marzban files will be located at `/opt/marzban`
 - The configuration file can be found at `/opt/marzban/.env` (refer to [configurations](#configuration) section to see variables)
-- The data files will be placed at `/usr/lib/marzban`
+- The data files will be placed at `/var/lib/marzban`
 - For security reasons, the Marzban dashboard is not accessible via IP address. Therefore, you must [obtain SSL certificate](https://gozargah.github.io/marzban/en/examples/issue-ssl-certificate) and access your Marzban dashboard by opening a web browser and navigating to `https://YOUR_DOMAIN:8000/dashboard/` (replace YOUR_DOMAIN with your actual domain)
 - You can also use SSH port forwarding to access the Marzban dashboard locally without a domain. Replace `user@serverip` with your actual SSH username and server IP and Run the command below:
 
@@ -144,7 +142,8 @@ You will lose access to the dashboard as soon as you close the SSH terminal. The
 Next, you need to create a sudo admin for logging into the Marzban dashboard by the following command
 
 ```bash
-marzban cli admin create --sudo
+cd /opt/marzban
+PYTHONPATH=/opt/scssw-marzban /opt/marzban/venv/bin/python /opt/scssw-marzban/marzban-cli.py admin create --sudo
 ```
 
 That's it! You can login to your dashboard using these credentials
@@ -152,7 +151,7 @@ That's it! You can login to your dashboard using these credentials
 To see the help message of the Marzban script, run the following command
 
 ```bash
-marzban --help
+tls
 ```
 
 If you are eager to run the project using the source code, check the section below
@@ -394,4 +393,3 @@ Marzban 配备了一个集成的 Telegram bot，可以处理服务器管理、�
 <p align="center">
   Made with <a rel="noopener noreferrer" target="_blank" href="https://contrib.rocks">contrib.rocks</a>
 </p>
-

@@ -1,5 +1,12 @@
 ARG PYTHON_VERSION=3.12
 
+FROM node:20-alpine AS dashboard
+WORKDIR /dashboard
+COPY app/dashboard/package.json app/dashboard/package-lock.json ./
+RUN npm ci
+COPY app/dashboard/ ./
+RUN VITE_BASE_API=/api/ npm run build -- --outDir build --assetsDir statics
+
 FROM python:$PYTHON_VERSION-slim AS build
 
 ENV PYTHONUNBUFFERED=1
@@ -27,6 +34,7 @@ COPY --from=build /usr/local/bin /usr/local/bin
 COPY --from=build /usr/local/share/xray /usr/local/share/xray
 
 COPY . /code
+COPY --from=dashboard /dashboard/build /code/app/dashboard/build
 
 RUN ln -s /code/marzban-cli.py /usr/bin/marzban-cli \
     && chmod +x /usr/bin/marzban-cli \

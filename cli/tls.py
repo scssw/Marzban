@@ -1,4 +1,5 @@
 import calendar
+import os
 import secrets
 import shutil
 import sqlite3
@@ -21,6 +22,21 @@ from . import utils
 
 app = typer.Typer(no_args_is_help=False, help="Interactive server and user management")
 GIB = 1024 ** 3
+
+
+def service_control(action):
+    compose_file = os.environ.get("MARZBAN_COMPOSE_FILE")
+    if compose_file:
+        command = ["docker", "compose", "-f", compose_file]
+        if action == "status":
+            command.extend(["ps", "marzban"])
+        elif action == "restart":
+            command.extend(["up", "-d", "--force-recreate", "marzban"])
+        else:
+            command.extend([action, "marzban"])
+    else:
+        command = ["systemctl", "status" if action == "status" else action, "marzban"]
+    return subprocess.run(command, check=False).returncode
 
 
 def prompt_int(label, minimum=1, maximum=None):
@@ -179,8 +195,7 @@ def domain_menu():
     domain = typer.prompt("域名").strip().lower()
     if not domain or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789.-" for char in domain):
         raise typer.BadParameter("域名格式无效")
-    root = Path.cwd()
-    env_file = root / ".env"
+    env_file = Path(os.environ.get("MARZBAN_ENV_FILE", Path.cwd() / ".env"))
     values = {}
     if env_file.exists():
         for line in env_file.read_text().splitlines():
@@ -196,14 +211,23 @@ def domain_menu():
         values["UVICORN_SSL_CERTFILE"] = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
         values["UVICORN_SSL_KEYFILE"] = f"/etc/letsencrypt/live/{domain}/privkey.pem"
     elif choice == "2":
-        values["UVICORN_SSL_CERTFILE"] = typer.prompt("证书文件路径")
-        values["UVICORN_SSL_KEYFILE"] = typer.prompt("私钥文件路径")
-        if not Path(values["UVICORN_SSL_CERTFILE"]).is_file() or not Path(values["UVICORN_SSL_KEYFILE"]).is_file():
+        certificate = Path(typer.prompt("证书文件路径")).expanduser().resolve()
+        private_key = Path(typer.prompt("私钥文件路径")).expanduser().resolve()
+        if not certificate.is_file() or not private_key.is_file():
             raise typer.BadParameter("指定证书或密钥文件不存在")
+        destination = Path("/var/lib/marzban/certs/local")
+        destination.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(certificate, destination / "fullchain.pem")
+        shutil.copy2(private_key, destination / "privkey.pem")
+        (destination / "privkey.pem").chmod(0o600)
+        values["UVICORN_SSL_CERTFILE"] = "/var/lib/marzban/certs/local/fullchain.pem"
+        values["UVICORN_SSL_KEYFILE"] = "/var/lib/marzban/certs/local/privkey.pem"
     else:
         return
     env_file.write_text("".join(f'{key}="{value}"\n' for key, value in values.items()))
-    subprocess.run(["systemctl", "restart", "marzban"], check=True)
+    if service_control("restart"):
+        typer.echo("域名配置已写入，但服务重启失败。请检查容器日志。", err=True)
+        raise typer.Exit(1)
     typer.echo(f"域名配置已写入 {env_file}，服务已重启。")
 
 
@@ -235,9 +259,9 @@ def backup_menu():
             typer.echo(f"{index}. {path.name}")
         selected = backups[prompt_int("选择备份", 1, len(backups)) - 1]
         if typer.confirm(f"将用 {selected.name} 覆盖当前数据库并重启服务？", abort=True):
-            subprocess.run(["systemctl", "stop", "marzban"], check=True)
+            service_control("stop")
             shutil.copy2(selected, Path(engine.url.database))
-            subprocess.run(["systemctl", "start", "marzban"], check=True)
+            service_control("start")
 
 
 @app.callback(invoke_without_command=True)
@@ -253,7 +277,7 @@ def menu(ctx: typer.Context):
             action = typer.prompt("1. 暂停  2. 重启  3. 状态", default="3")
             command = {"1": "stop", "2": "restart", "3": "status"}.get(action)
             if command:
-                subprocess.run(["systemctl", command, "marzban"], check=False)
+                service_control(command)
         elif choice == "2":
             users_menu()
         elif choice == "3":
