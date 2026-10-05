@@ -9,6 +9,7 @@ DATA_DIR="/var/lib/marzban"
 if [[ $EUID -ne 0 ]]; then
     exec sudo bash "$0" "$@"
 fi
+cd /
 
 if [[ ! -f /etc/debian_version ]] || ! command -v apt-get >/dev/null 2>&1; then
     echo "此安装脚本目前支持 Debian/Ubuntu。" >&2
