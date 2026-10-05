@@ -11,11 +11,13 @@ from typer._completion_shared import Shells
 import cli.admin
 import cli.subscription
 import cli.user
+import cli.tls
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 app.add_typer(cli.admin.app, name="admin")
 app.add_typer(cli.subscription.app, name="subscription")
 app.add_typer(cli.user.app, name="user")
+app.add_typer(cli.tls.app, name="tls")
 
 
 # Hidden completion app
