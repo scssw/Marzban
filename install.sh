@@ -16,16 +16,6 @@ if [[ ! -f /etc/debian_version ]] || ! command -v apt-get >/dev/null 2>&1; then
     exit 1
 fi
 
-if [[ -e "$INSTALL_DIR" ]]; then
-    echo "$INSTALL_DIR 已存在。为保护现有配置和数据，安装程序不会覆盖它。" >&2
-    echo "请先备份数据，并将现有安装目录移走后重试。" >&2
-    exit 1
-fi
-if [[ -e "$SOURCE_DIR" ]]; then
-    echo "$SOURCE_DIR 已存在；请先检查并移走旧源码目录。" >&2
-    exit 1
-fi
-
 read -r -p "绑定域名: " DOMAIN
 if [[ ! "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || [[ "$DOMAIN" != *.* ]]; then
     echo "请输入有效域名。" >&2
@@ -66,22 +56,51 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 systemctl enable --now docker
 
-certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email -d "$DOMAIN"
+if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
+    docker compose -f "$INSTALL_DIR/docker-compose.yml" down || true
+fi
+if ss -H -ltn 'sport = :8188' | grep -q .; then
+    echo "TCP 8188 仍被其他程序占用，请释放该端口后重试。" >&2
+    exit 1
+fi
 
-git clone --depth 1 "$REPOSITORY" "$SOURCE_DIR"
+if [[ -d "$SOURCE_DIR/.git" ]]; then
+    git -C "$SOURCE_DIR" fetch --depth 1 origin master
+    git -C "$SOURCE_DIR" reset --hard FETCH_HEAD
+elif [[ -e "$SOURCE_DIR" ]]; then
+    echo "$SOURCE_DIR 存在但不是 Git 仓库；请先检查后移走该源码目录。" >&2
+    exit 1
+else
+    git clone --depth 1 "$REPOSITORY" "$SOURCE_DIR"
+fi
 mkdir -p "$INSTALL_DIR" "$DATA_DIR"
-cp "$SOURCE_DIR/.env.example" "$INSTALL_DIR/.env"
+if [[ ! -f "$INSTALL_DIR/.env" ]]; then
+    cp "$SOURCE_DIR/.env.example" "$INSTALL_DIR/.env"
+fi
 chmod 600 "$INSTALL_DIR/.env"
-cp "$SOURCE_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 if [[ ! -f "$DATA_DIR/xray_config.json" ]]; then
     cp "$SOURCE_DIR/xray_config.json" "$DATA_DIR/xray_config.json"
 fi
 
-sed -i 's|^# *XRAY_JSON *=.*|XRAY_JSON = "/var/lib/marzban/xray_config.json"|' "$INSTALL_DIR/.env"
-sed -i 's|^# *SQLALCHEMY_DATABASE_URL *=.*|SQLALCHEMY_DATABASE_URL = "sqlite:////var/lib/marzban/db.sqlite3"|' "$INSTALL_DIR/.env"
-sed -i 's/^UVICORN_PORT *=.*/UVICORN_PORT = 8188/' "$INSTALL_DIR/.env"
-printf '\nUVICORN_SSL_CERTFILE="/etc/letsencrypt/live/%s/fullchain.pem"\nUVICORN_SSL_KEYFILE="/etc/letsencrypt/live/%s/privkey.pem"\nXRAY_SUBSCRIPTION_URL_PREFIX="https://%s"\n' \
-    "$DOMAIN" "$DOMAIN" "$DOMAIN" >> "$INSTALL_DIR/.env"
+if [[ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" || ! -f "/etc/letsencrypt/live/$DOMAIN/privkey.pem" ]] \
+    || ! openssl x509 -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" -checkend 86400 -noout >/dev/null 2>&1; then
+    certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email -d "$DOMAIN"
+fi
+
+set_env() {
+    local key="$1" value="$2"
+    if grep -qE "^#?${key}[[:space:]]*=" "$INSTALL_DIR/.env"; then
+        sed -i -E "s|^#?${key}[[:space:]]*=.*|${key} = \"${value}\"|" "$INSTALL_DIR/.env"
+    else
+        printf '%s = "%s"\n' "$key" "$value" >> "$INSTALL_DIR/.env"
+    fi
+}
+set_env XRAY_JSON /var/lib/marzban/xray_config.json
+set_env SQLALCHEMY_DATABASE_URL sqlite:////var/lib/marzban/db.sqlite3
+set_env UVICORN_PORT 8188
+set_env UVICORN_SSL_CERTFILE "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+set_env UVICORN_SSL_KEYFILE "/etc/letsencrypt/live/$DOMAIN/privkey.pem"
+set_env XRAY_SUBSCRIPTION_URL_PREFIX "https://$DOMAIN"
 
 python3 -m venv "$INSTALL_DIR/venv"
 "$INSTALL_DIR/venv/bin/pip" install -r "$SOURCE_DIR/requirements.txt"
@@ -108,6 +127,10 @@ ADMIN_CREATED=false
 for attempt in $(seq 1 60); do
     if OUTPUT=$(printf '%s\n%s\n' "$ADMIN_USERNAME" "$ADMIN_PASSWORD" | docker compose -f "$INSTALL_DIR/docker-compose.yml" exec -T marzban sh -c 'read -r username; read -r password; export MARZBAN_ADMIN_PASSWORD="$password"; exec marzban-cli admin create --username "$username" --sudo --telegram-id 0 --discord-webhook ""' 2>&1); then
         echo "$OUTPUT"
+        ADMIN_CREATED=true
+        break
+    elif [[ "$OUTPUT" == *"already exists"* ]]; then
+        echo "管理员 $ADMIN_USERNAME 已存在，保留现有账号和密码。"
         ADMIN_CREATED=true
         break
     fi
